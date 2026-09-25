@@ -1,6 +1,10 @@
 """품번으로 KREAM / POIZON 시세를 조회한다.
 
-사용법:
+사용법 (주력: 품번 + 매입가 -> 사이즈 추천):
+    python price_check.py DD1391-100 69000
+    python price_check.py DD1391-100 69000 --sizes 250-290 --min-profit 15000
+
+사용법 (사이즈 하나만 자세히):
     python price_check.py DD1391-100
     python price_check.py DD1391-100 --size 270
     python price_check.py DD1391-100 --size 270 --buy 69000
@@ -26,12 +30,15 @@ from playwright.sync_api import sync_playwright
 from parsers import normalize, parse_kream, parse_poizon, parse_poizon_seller
 from fees import KREAM_DEFAULT_LEVEL, KREAM_SHIP_COST, kream_fee, kream_net_profit, poizon_cost, poizon_net_profit
 from profit import net_profit
+from scan import MIN_PROFIT, build_table, kream_size_row, parse_sizes, recommend, report
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "browser_profile"
 DEBUG_DIR = BASE_DIR / "debug"
 # 열 구성이 바뀌어 새 파일에 기록한다 (예전 기록은 price_log.csv에 그대로 남음)
 LOG_FILE = BASE_DIR / "results" / "price_log_v2.csv"
+SCAN_LOG = BASE_DIR / "results" / "scan_log.csv"
+DEFAULT_SIZES = "230-300"
 POIZON_SELLER_URL = "https://seller.poizon.com/main/dataBoard"
 KREAM_MAX_CANDIDATES = 5
 SEARCH_HINTS = ["货号", "품번", "商品", "상품", "SKU", "SPU", "Article", "검색", "搜索", "Search"]
@@ -92,6 +99,47 @@ def check_kream(page, code, size):
             return r
     r.update(first, found=True, debug=str(save_debug(page, "kream", code)),
              note=f"검색 상위 {len(seen)}개 모두 모델번호 불일치: {', '.join(seen)}")
+    return r
+
+
+def find_kream_product(page, code):
+    """크림 검색 결과를 차례로 열어 모델번호가 맞는 상품 주소를 찾는다. 못 찾으면 (None, 확인한 모델번호들)."""
+    page.goto(f"https://kream.co.kr/search?keyword={quote(code)}", wait_until="domcontentloaded")
+    page.wait_for_timeout(4000)
+    seen = []
+    for link in all_links(page, r"kream\.co\.kr/products/\d+$")[:KREAM_MAX_CANDIDATES]:
+        page.goto(link, wait_until="domcontentloaded")
+        page.wait_for_timeout(3000)
+        info = parse_kream(page.inner_text("body"))
+        seen.append(info["model"] or "?")
+        if normalize(info["model"]) == normalize(code):
+            return link, info, seen
+    return None, None, seen
+
+
+def kream_scan(page, code, sizes):
+    """사이즈마다 크림 페이지(?size=)를 열어 구매가와 최근 체결 5건을 모은다."""
+    r = {"site": "KREAM", "found": False, "rows": []}
+    link, info, seen = find_kream_product(page, code)
+    if not link:
+        r["note"] = f"모델번호가 같은 상품을 못 찾음 (확인한 모델번호: {', '.join(seen) or '없음'})"
+        r["debug"] = str(save_debug(page, "kream_scan_fail", code))
+        return r
+    r.update(found=True, url=link, title=info["title"], model=info["model"],
+             release_price=info["release_price"], login_needed=info["login_needed"])
+    for s in sizes:
+        page.goto(f"{link}?size={s}", wait_until="domcontentloaded")
+        try:
+            page.wait_for_selector(f"text={s} 구매가", timeout=7000)
+            page.wait_for_selector("text=거래일", timeout=4000)
+        except Exception:
+            pass  # 없는 사이즈이거나 늦게 뜬 경우. 아래에서 빈 값으로 처리
+        page.wait_for_timeout(800)
+        si = parse_kream(page.inner_text("body"))
+        row = kream_size_row(si, s)
+        r["rows"].append(row)
+        print(f"  크림 {s}: 예상가 {row['kream_expected'] or '-'} / 최근{row['trades']}건 {row['speed']}")
+    r["debug"] = str(save_debug(page, "kream_scan", code))
     return r
 
 
@@ -283,9 +331,73 @@ def login():
     print("로그인 상태를 저장했습니다.")
 
 
+def run_scan(ctx, page, code, buy, sizes, level, min_profit, kream_only, use_poizon=False):
+    print(f"품번 {code} / 매입가 {buy:,}원 / 사이즈 {sizes[0]}~{sizes[-1]} 조회 중... (1~2분 걸림)")
+    kream = poizon_pub = seller = None
+    try:
+        kream = kream_scan(page, code, sizes)
+    except Exception as e:
+        kream = {"found": False, "rows": [], "note": f"오류: {e}", "debug": str(save_debug(page, "kream_error", code))}
+    if not kream_only:
+        try:
+            poizon_pub = check_poizon(page, code)
+        except Exception as e:
+            poizon_pub = {"found": False, "note": f"오류: {e}"}
+        try:
+            seller = check_poizon_seller(page, code)
+        except Exception as e:
+            seller = {"found": False, "note": f"오류: {e}"}
+
+    if not kream["found"]:
+        print(f"\n[KREAM] {kream.get('note')}")
+        return None
+    pz_sizes = []
+    if poizon_pub and poizon_pub.get("found"):
+        same = normalize(poizon_pub.get("title")) == normalize(kream.get("title"))
+        if same:
+            pz_sizes = poizon_pub.get("sizes", [])
+        else:
+            print(f"\n[POIZON] 크림 상품명과 달라 제외: {poizon_pub.get('title')}")
+    rows = build_table(kream["rows"], pz_sizes, buy, level, poizon_in_best=use_poizon)
+    rec = recommend(rows, min_profit)
+    text = report(code, kream.get("title"), buy, rows, rec,
+                  seller if seller and seller.get("found") else None, poizon_in_best=use_poizon)
+    if kream.get("login_needed"):
+        text += "\n* 크림 로그인이 안 된 상태라 체결 거래가 부족할 수 있음 -> run.cmd --login"
+    print("\n" + text)
+    save_scan(code, buy, kream, rows, rec, text)
+    return text
+
+
+def save_scan(code, buy, kream, rows, rec, text):
+    SCAN_LOG.parent.mkdir(exist_ok=True)
+    (SCAN_LOG.parent / "last_report.txt").write_text(text, encoding="utf-8")
+    new = not SCAN_LOG.exists()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open(SCAN_LOG, "a", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["time", "code", "title", "buy", "verdict", "size", "kream_ask", "kream_last",
+                        "kream_trades", "kream_span_days", "kream_speed", "kream_profit",
+                        "poizon_price", "poizon_profit", "best_channel", "best_profit", "kream_url"])
+        for r in rows:
+            w.writerow([now, code, kream.get("title") or "", buy, rec["verdict"], r["size"],
+                        r["ask"] or "", r["last"] or "", r["trades"], "" if r["span"] is None else r["span"],
+                        r["speed"], r["kream_profit"] if r["kream_profit"] is not None else "",
+                        r["poizon_price"] or "", r["poizon_profit"] if r["poizon_profit"] is not None else "",
+                        r["best_channel"] or "", r["best_profit"] if r["best_profit"] is not None else "",
+                        kream.get("url", "")])
+
+
 def main():
     ap = argparse.ArgumentParser(description="KREAM / POIZON 시세 조회")
     ap.add_argument("code", nargs="?", help="품번 (예: DD1391-100)")
+    ap.add_argument("buy_pos", nargs="?", type=int, metavar="매입가", help="매입가 (예: 69000)")
+    ap.add_argument("--sizes", default=DEFAULT_SIZES, help=f"조회할 사이즈 범위 (기본 {DEFAULT_SIZES}, 예: 250-290 또는 250,260,270)")
+    ap.add_argument("--min-profit", type=int, default=MIN_PROFIT, help=f"사입 기준 순수익 (기본 {MIN_PROFIT:,}원)")
+    ap.add_argument("--kream-only", action="store_true", help="포이즌 조회를 아예 건너뜀 (더 빠름)")
+    ap.add_argument("--use-poizon-price", action="store_true",
+                    help="포이즌 소비자 사이트 사이즈별 가격도 판정에 포함 (정산가와 같다고 확인된 경우만)")
     ap.add_argument("--size", help="사이즈 (예: 270)")
     ap.add_argument("--buy", type=int, help="매입가 (넣으면 순수익 계산)")
     ap.add_argument("--headless", action="store_true", help="브라우저 창 숨기기")
@@ -299,7 +411,20 @@ def main():
     if args.login:
         return login()
     if not args.code:
-        ap.error("품번을 입력하세요. 예: run.cmd DD1391-100 --size 270")
+        ap.error("품번을 입력하세요. 예: run.cmd DD1391-100 69000")
+    buy = args.buy_pos or args.buy
+
+    if not args.size:
+        if not buy:
+            ap.error("매입가를 입력하세요. 예: run.cmd DD1391-100 69000")
+        with sync_playwright() as p:
+            ctx = open_browser(p, args.headless)
+            page = ctx.new_page()
+            run_scan(ctx, page, args.code, buy, parse_sizes(args.sizes), args.kream_level,
+                     args.min_profit, args.kream_only, args.use_poizon_price)
+            ctx.close()
+        return
+    args.buy = buy
 
     print(f"품번 {args.code}" + (f" / 사이즈 {args.size}" if args.size else "") + " 조회 중...")
     kream = poizon = None
