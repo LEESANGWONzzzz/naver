@@ -24,7 +24,7 @@ from urllib.parse import quote
 from playwright.sync_api import sync_playwright
 
 from parsers import normalize, parse_kream, parse_poizon
-from fees import KREAM_DEFAULT_LEVEL, kream_fee, kream_net_profit, poizon_net_profit
+from fees import KREAM_DEFAULT_LEVEL, KREAM_SHIP_COST, kream_fee, kream_net_profit, poizon_cost, poizon_net_profit
 from profit import net_profit
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -136,11 +136,11 @@ def profit_text(price, buy, level=None, channel="smartstore"):
         return ""
     ss = f"스마트스토어 판매 시 {net_profit(price, buy):,}원"
     if channel == "kream":
-        return f"\n      순수익: 크림 판매 시 {kream_net_profit(price, buy, level):,}원 (수수료 {kream_fee(price, level):,}원) / {ss}"
+        return (f"\n      순수익: 크림 판매 시 {kream_net_profit(price, buy, level):,}원 "
+                f"(수수료 {kream_fee(price, level):,}원 + 택배 {KREAM_SHIP_COST:,}원) / {ss}")
     if channel == "poizon":
-        pz = poizon_net_profit(price, buy)
-        pz_text = f"포이즌 판매 시 {pz:,}원" if pz is not None else "포이즌 판매 시 확인 불가(수수료 미확인)"
-        return f"\n      순수익: {pz_text} / {ss}"
+        return (f"\n      순수익: 포이즌 판매 시 {poizon_net_profit(price, buy):,}원 "
+                f"(수수료+택배 {poizon_cost(price):,}원) / {ss}")
     return f"\n      순수익: {ss}"
 
 
