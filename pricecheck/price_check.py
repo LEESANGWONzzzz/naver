@@ -378,7 +378,8 @@ def run_scan(ctx, page, code, buy, sizes, level, min_profit, kream_only, use_poi
             print(f"\n[POIZON 소비자 사이트] 상품명이 달라 제외: {poizon_pub.get('title')} (기준: {ref})")
     if not kream["found"] and not seller_ok:
         print("\n크림, 포이즌 셀러센터 모두 데이터를 못 찾아 판정 불가")
-        return None
+        text = f"{code} 매입가 {buy:,}원\n판정: 판정 불가 (크림, 포이즌 셀러센터 모두 데이터 없음)"
+        return {"code": code, "buy": buy, "title": None, "rec": None, "text": text}
     rows = kream["rows"]
     if not rows and pz_sizes:
         # 크림 데이터가 없으면 포이즌 사이즈표로 줄을 만든다 (크림 칸은 빈 값)
@@ -391,7 +392,66 @@ def run_scan(ctx, page, code, buy, sizes, level, min_profit, kream_only, use_poi
         text += "\n* 크림 로그인이 안 된 상태라 체결 거래가 부족할 수 있음 -> run.cmd --login"
     print("\n" + text)
     save_scan(code, buy, dict(kream, title=title), rows, rec, text)
-    return text
+    return {"code": code, "buy": buy, "title": title, "rec": rec, "text": text}
+
+
+def summary_line(i, r):
+    """여러 품번 조회 시 품번 하나를 한 줄로 요약."""
+    head = f"{i}) {r['code']} 매입 {r['buy']:,}"
+    rec = r.get("rec")
+    if not rec:
+        return f"{head} -> 판정 불가"
+    verdict = rec["verdict"].split(" (")[0]
+    parts = []
+    if rec["picks"]:
+        parts.append("추천 " + ", ".join(
+            f"{x['size']} {x['best_channel']} {x['best_profit']:+,}({x['speed']})" for x in rec["picks"]))
+    pz = rec.get("pz")
+    if pz:
+        parts.append(f"포이즌 평균 {pz['profit']:+,}(30일 {pz['sales30_text'] or '-'}건)")
+    if not rec.get("kream_data"):
+        parts.append("크림 없음")
+    return f"{head} -> {verdict}" + (" | " + " | ".join(parts) if parts else "")
+
+
+def parse_items(tokens):
+    """["DD1391-100", "69000", "IB7167-103", "52,100원"] -> [("DD1391-100", 69000), ...]"""
+    items, code = [], None
+    for tok in tokens:
+        tok = tok.strip().strip(",/")
+        if not tok:
+            continue
+        digits = tok.replace(",", "").replace("원", "")
+        if digits.isdigit() and code:
+            items.append((code.upper(), int(digits)))
+            code = None
+        elif not digits.isdigit():
+            code = tok
+    if code:
+        items.append((code.upper(), None))
+    return items
+
+
+def run_batch(items, args):
+    results = []
+    with sync_playwright() as p:
+        ctx = open_browser(p, args.headless)
+        page = ctx.new_page()
+        for n, (code, buy) in enumerate(items, 1):
+            print(f"\n===== [{n}/{len(items)}] {code} =====")
+            try:
+                r = run_scan(ctx, page, code, buy, parse_sizes(args.sizes) if args.sizes else None,
+                             args.kream_level, args.min_profit, args.kream_only, args.use_poizon_price)
+            except Exception as e:
+                r = {"code": code, "buy": buy, "rec": None, "text": f"{code}: 오류 {e}"}
+            results.append(r)
+        ctx.close()
+    if len(results) > 1:
+        lines = [f"===== 요약 ({len(results)}개) ====="] + [summary_line(i, r) for i, r in enumerate(results, 1)]
+        summary = "\n".join(lines)
+        print("\n" + summary)
+        full = summary + "\n\n" + "\n\n".join(r["text"] for r in results)
+        (SCAN_LOG.parent / "last_report.txt").write_text(full, encoding="utf-8")
 
 
 def save_scan(code, buy, kream, rows, rec, text):
@@ -422,8 +482,8 @@ def main():
         except Exception:
             pass
     ap = argparse.ArgumentParser(description="KREAM / POIZON 시세 조회")
-    ap.add_argument("code", nargs="?", help="품번 (예: DD1391-100)")
-    ap.add_argument("buy_pos", nargs="?", type=int, metavar="매입가", help="매입가 (예: 69000)")
+    ap.add_argument("items", nargs="*", metavar="품번 매입가",
+                    help="품번과 매입가를 짝지어 여러 개 가능. 예: DD1391-100 69000 IB7167-103 52100")
     ap.add_argument("--sizes", help=f"조회할 사이즈 범위 (기본: 남성 {MEN_SIZES}, 여성 {WOMEN_SIZES} 자동. 예: 250-290 또는 250,260,270)")
     ap.add_argument("--min-profit", type=int, default=MIN_PROFIT, help=f"사입 기준 순수익 (기본 {MIN_PROFIT:,}원)")
     ap.add_argument("--kream-only", action="store_true", help="포이즌 조회를 아예 건너뜀 (더 빠름)")
@@ -441,21 +501,20 @@ def main():
 
     if args.login:
         return login()
-    if not args.code:
+    items = parse_items(args.items)
+    if not items:
         ap.error("품번을 입력하세요. 예: run.cmd DD1391-100 69000")
-    buy = args.buy_pos or args.buy
+    if len(items) == 1 and items[0][1] is None and args.buy:
+        items = [(items[0][0], args.buy)]
 
     if not args.size:
-        if not buy:
-            ap.error("매입가를 입력하세요. 예: run.cmd DD1391-100 69000")
-        with sync_playwright() as p:
-            ctx = open_browser(p, args.headless)
-            page = ctx.new_page()
-            run_scan(ctx, page, args.code, buy, parse_sizes(args.sizes) if args.sizes else None, args.kream_level,
-                     args.min_profit, args.kream_only, args.use_poizon_price)
-            ctx.close()
-        return
-    args.buy = buy
+        missing = [c for c, b in items if not b]
+        if missing:
+            ap.error(f"매입가가 빠진 품번: {', '.join(missing)}. 예: run.cmd DD1391-100 69000 IB7167-103 52100")
+        return run_batch(items, args)
+    if len(items) > 1:
+        ap.error("--size는 품번 하나일 때만 쓸 수 있습니다.")
+    args.code, args.buy = items[0][0], items[0][1] or args.buy
 
     print(f"품번 {args.code}" + (f" / 사이즈 {args.size}" if args.size else "") + " 조회 중...")
     kream = poizon = None
