@@ -9,6 +9,7 @@ from fees import kream_net_profit, poizon_net_profit
 from parsers import size_key
 
 MIN_PROFIT = 10000   # 이 금액 이상 남아야 "차익 있음"으로 본다 (--min-profit 으로 변경)
+POIZON_MIN_SALES30 = 10   # 포이즌 셀러센터 30일 판매량이 이 이상이면 "잘 팔림"으로 본다
 
 
 def days_ago(when, today=None):
@@ -89,26 +90,59 @@ def build_table(kream_rows, poizon_sizes, buy, level, poizon_in_best=False):
     return rows
 
 
-def recommend(rows, min_profit=MIN_PROFIT, top=3):
+def sales_number(s):
+    """"3,900+" -> 3900, "34" -> 34, 모르면 None"""
+    m = re.match(r"^([0-9,]+)", str(s or ""))
+    return int(m.group(1).replace(",", "")) if m else None
+
+
+def poizon_summary(seller, buy):
+    """포이즌 셀러센터 30일 평균 거래가(실거래 평균) 기준 순수익. 상품 전체(모든 사이즈) 기준."""
+    if not seller or not seller.get("avg30"):
+        return None
+    sales = sales_number(seller.get("sales30"))
+    return {"avg30": seller["avg30"], "profit": poizon_net_profit(seller["avg30"], buy),
+            "sales30": sales, "sales30_text": seller.get("sales30"),
+            "selling": sales is not None and sales >= POIZON_MIN_SALES30}
+
+
+def recommend(rows, min_profit=MIN_PROFIT, top=3, pz=None):
     """추천 사이즈와 사입 판정.
 
-    - 추천: 순수익 >= min_profit 이고 크림 판매 속도가 "보통" 이상인 사이즈를
-            (순수익 x 속도 가중치) 높은 순으로 top개
-    - 판정: 추천 사이즈가 있으면 "사입 추천", 차익은 있는데 느리면 "신중",
-            차익 없으면 "사입 비추천"
+    - 크림 추천: 순수익 >= min_profit 이고 크림 판매 속도가 "보통" 이상인 사이즈를
+                 (순수익 x 속도 가중치) 높은 순으로 top개
+    - 포이즌: 셀러센터 30일 평균 거래가 기준 순수익 >= min_profit 이고 30일 판매량이 충분하면 추천
+    - 판정: 크림 추천 사이즈 또는 포이즌 조건을 만족하면 "사입 추천",
+            차익은 있는데 느리거나 기준에 조금 못 미치면 "신중", 그 외 "사입 비추천"
     """
     profitable = [r for r in rows if r["best_profit"] is not None and r["best_profit"] >= min_profit]
     good = [r for r in profitable if r["weight"] >= 0.7]
     good.sort(key=lambda r: r["best_profit"] * r["weight"], reverse=True)
     slow = [r for r in profitable if r["weight"] < 0.7]
     slow.sort(key=lambda r: r["best_profit"], reverse=True)
+    kream_data = any(r.get("kream_expected") for r in rows)
+    pz_ok = bool(pz and pz["profit"] >= min_profit and pz["selling"])
+    pz_some = bool(pz and pz["profit"] > 0)
+
+    reasons = []
     if good:
-        verdict = "사입 추천"
-    elif slow:
-        verdict = "신중 (차익은 있지만 크림 판매가 느리거나 거래가 적음)"
+        reasons.append("크림")
+    if pz_ok:
+        reasons.append("포이즌 30일 평균가")
+    if reasons:
+        verdict = f"사입 추천 ({' + '.join(reasons)} 기준)"
+    elif slow or pz_some:
+        why = []
+        if slow:
+            why.append("크림은 차익 있지만 느리거나 거래 적음")
+        if pz_some:
+            why.append(f"포이즌 30일 평균가 기준 순수익 {pz['profit']:,}원"
+                       + ("" if pz["selling"] else ", 판매량 적음"))
+        verdict = "신중 (" + " / ".join(why) + ")"
     else:
         verdict = "사입 비추천 (차익이 기준 미달)"
-    return {"verdict": verdict, "picks": good[:top], "slow": slow[:top], "min_profit": min_profit}
+    return {"verdict": verdict, "picks": good[:top], "slow": slow[:top], "min_profit": min_profit,
+            "kream_data": kream_data, "pz": pz}
 
 
 def parse_sizes(spec):
@@ -132,6 +166,12 @@ def report(code, title, buy, rows, rec, seller=None, poizon_in_best=False):
     """모바일에서 읽기 좋게 결과 글자를 만든다."""
     out = [f"{code} {title or ''}".strip(), f"매입가 {buy:,}원 / 기준 순수익 {rec['min_profit']:,}원 이상", ""]
     out.append(f"판정: {rec['verdict']}")
+    pz = rec.get("pz")
+    if pz:
+        out.append(f"포이즌(셀러센터, 전체 사이즈): 30일 평균 {pz['avg30']:,}원 -> 순수익 {pz['profit']:+,}원, "
+                   f"30일 판매 {pz['sales30_text'] or '-'}건")
+    if not rec.get("kream_data"):
+        out.append("크림: 이 품번 데이터 없음 (미등록이거나 거래 없음)")
     if rec["picks"]:
         out.append("추천 사이즈:")
         for i, r in enumerate(rec["picks"], 1):
@@ -144,10 +184,10 @@ def report(code, title, buy, rows, rec, seller=None, poizon_in_best=False):
         for r in rec["slow"]:
             span = f"{r['span']}일" if r["span"] is not None else "-"
             out.append(f"  - {r['size']}  {r['best_channel']} 순수익 {fmt_profit(r['best_profit'])}원 (크림 최근{r['trades']}건 {span}, {r['speed']})")
-    if seller:
-        out.append("")
-        out.append(f"포이즌 셀러센터(전체 사이즈): 30일 평균 {fmt_won(seller.get('avg30'))}원, "
-                   f"노출가 {fmt_won(seller.get('exposure'))}원, 30일 판매 {seller.get('sales30') or '-'}")
+    pz_sizes = sorted([r for r in rows if r.get("poizon_price")], key=lambda r: r["poizon_price"], reverse=True)
+    if pz_sizes:
+        out.append("포이즌 소비자가 높은 사이즈(참고): "
+                   + ", ".join(f"{r['size']} {r['poizon_price']:,}" for r in pz_sizes[:3]))
     out.append("")
     pz_head = "포이즌가 | 포이즌 순익" if poizon_in_best else "포이즌가(참고) | 포이즌 순익(참고)"
     out.append(f"사이즈 | 크림 예상가 | 크림 순익 | 크림 속도 | {pz_head}")
@@ -160,6 +200,6 @@ def report(code, title, buy, rows, rec, seller=None, poizon_in_best=False):
     if poizon_in_best:
         out.append("* 포이즌가 = 소비자 사이트 사이즈별 가격, 판정에 포함함 (--use-poizon-price)")
     else:
-        out.append("* 판정은 크림 기준. 포이즌가는 소비자 사이트 가격이라 판매자 정산가보다 높을 수 있어 참고만")
+        out.append("* 판정 = 크림 사이즈별 + 포이즌 셀러센터 30일 평균가(실거래 평균, 전체 사이즈). 포이즌 사이즈별 소비자가는 참고만")
 
     return "\n".join(out)

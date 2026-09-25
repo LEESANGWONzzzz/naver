@@ -30,7 +30,7 @@ from playwright.sync_api import sync_playwright
 from parsers import normalize, parse_kream, parse_poizon, parse_poizon_seller, size_key
 from fees import KREAM_DEFAULT_LEVEL, KREAM_SHIP_COST, kream_fee, kream_net_profit, poizon_cost, poizon_net_profit
 from profit import net_profit
-from scan import MIN_PROFIT, build_table, kream_size_row, parse_sizes, recommend, report
+from scan import MIN_PROFIT, build_table, kream_size_row, parse_sizes, poizon_summary, recommend, report
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "browser_profile"
@@ -365,24 +365,32 @@ def run_scan(ctx, page, code, buy, sizes, level, min_profit, kream_only, use_poi
         except Exception as e:
             seller = {"found": False, "note": f"오류: {e}"}
 
+    seller_ok = seller if seller and seller.get("found") else None
     if not kream["found"]:
         print(f"\n[KREAM] {kream.get('note')}")
-        return None
     pz_sizes = []
     if poizon_pub and poizon_pub.get("found"):
-        same = normalize(poizon_pub.get("title")) == normalize(kream.get("title"))
-        if same:
+        # 같은 상품인지: 크림이 있으면 크림 상품명, 없으면 셀러센터 상품명(품번으로 찾은 것)과 비교
+        ref = kream.get("title") if kream["found"] else (seller_ok or {}).get("title")
+        if ref and normalize(poizon_pub.get("title")) == normalize(ref):
             pz_sizes = poizon_pub.get("sizes", [])
         else:
-            print(f"\n[POIZON] 크림 상품명과 달라 제외: {poizon_pub.get('title')}")
-    rows = build_table(kream["rows"], pz_sizes, buy, level, poizon_in_best=use_poizon)
-    rec = recommend(rows, min_profit)
-    text = report(code, kream.get("title"), buy, rows, rec,
-                  seller if seller and seller.get("found") else None, poizon_in_best=use_poizon)
+            print(f"\n[POIZON 소비자 사이트] 상품명이 달라 제외: {poizon_pub.get('title')} (기준: {ref})")
+    if not kream["found"] and not seller_ok:
+        print("\n크림, 포이즌 셀러센터 모두 데이터를 못 찾아 판정 불가")
+        return None
+    rows = kream["rows"]
+    if not rows and pz_sizes:
+        # 크림 데이터가 없으면 포이즌 사이즈표로 줄을 만든다 (크림 칸은 빈 값)
+        rows = [kream_size_row({}, s["size"]) for s in pz_sizes if s["price"]]
+    rows = build_table(rows, pz_sizes, buy, level, poizon_in_best=use_poizon)
+    rec = recommend(rows, min_profit, pz=poizon_summary(seller_ok, buy))
+    title = kream.get("title") or (seller_ok or {}).get("title")
+    text = report(code, title, buy, rows, rec, seller_ok, poizon_in_best=use_poizon)
     if kream.get("login_needed"):
         text += "\n* 크림 로그인이 안 된 상태라 체결 거래가 부족할 수 있음 -> run.cmd --login"
     print("\n" + text)
-    save_scan(code, buy, kream, rows, rec, text)
+    save_scan(code, buy, dict(kream, title=title), rows, rec, text)
     return text
 
 
