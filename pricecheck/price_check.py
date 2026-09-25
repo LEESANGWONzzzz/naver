@@ -415,6 +415,12 @@ def save_scan(code, buy, kream, rows, rec, text):
 
 
 def main():
+    # Claude Code(Remote Control)가 실행할 때 cp949 콘솔에서 특수문자로 멈추지 않게 한다
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
     ap = argparse.ArgumentParser(description="KREAM / POIZON 시세 조회")
     ap.add_argument("code", nargs="?", help="품번 (예: DD1391-100)")
     ap.add_argument("buy_pos", nargs="?", type=int, metavar="매입가", help="매입가 (예: 69000)")

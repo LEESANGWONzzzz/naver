@@ -108,34 +108,41 @@ run.cmd --login
 
 ## 3단계: 아이폰에서 명령하기 (Remote Control)
 
-1. **Git for Windows 설치**: https://git-scm.com/download/win (Claude Code가 윈도우에서 사용)
-2. **Claude Code 설치**: PowerShell을 열고
+공식 문서: https://code.claude.com/docs/en/remote-control (2026-09-26 확인)
+- Pro, Max, Team, Enterprise 요금제에서 사용 가능 (API 키 로그인은 안 됨)
+- PC에서 `claude remote-control`을 켜 둔 동안만 아이폰에서 쓸 수 있다
+
+### PC 준비 (한 번만)
+
+1. (선택) Git for Windows 설치: https://git-scm.com/downloads/win
+2. cmd에서 Claude Code 설치:
+   ```
+   curl -fsSL https://claude.ai/install.cmd -o install.cmd && install.cmd && del install.cmd
+   ```
+3. cmd 창을 닫고 새로 열어 확인: `claude --version`
+4. 저장소 폴더에서 로그인 + 폴더 신뢰:
+   ```
+   cd /d C:\work\naver-claude-affectionate-dijkstra-8vza7e
+   claude
+   ```
+   브라우저가 열리면 claude.ai로 로그인, 폴더 신뢰 질문에 Yes. 그다음 `/exit`로 나온다.
+5. 절전 끄기: 설정 -> 시스템 -> 전원 -> 화면과 절전 -> 절전 모드 "안 함"
+
+### 외출 전에 (매번)
 
 ```
-irm https://claude.ai/install.ps1 | iex
-```
-
-3. cmd에서 저장소 폴더로 가서 로그인 후 Remote Control 켜기:
-
-```
-cd C:\work\naver
-claude
-```
-
-처음 한 번 로그인하고 `/exit`로 나온 뒤:
-
-```
+cd /d C:\work\naver-claude-affectionate-dijkstra-8vza7e
 claude remote-control
 ```
+- 처음 한 번 `Enable Remote Control? (y/n)`이 나오면 `y`
+- 스페이스바를 누르면 QR 코드가 나온다 -> 아이폰 카메라로 찍으면 Claude 앱에서 열린다
+- 이 cmd 창은 닫지 않는다 (닫으면 아이폰에서 연결 끊김)
 
-4. 아이폰 Claude 앱 → Code 쪽에 이 PC 세션이 보이면 거기서
-   "DD1391-100 270 시세, 매입가 69000" 처럼 보내면 된다.
+### 아이폰에서
 
-주의:
-- 외출 중 PC가 **절전 모드로 들어가지 않게** 설정 (설정 → 시스템 → 전원 → 화면과 절전 → 절전 모드 "안 함").
-- Remote Control을 쓸 수 있는 요금제인지, 정확한 메뉴 위치는 공식 문서에서 확인:
-  https://code.claude.com/docs
-- 설치 명령어가 바뀌었을 수 있으니 안 되면 위 문서의 Windows 설치 안내를 따른다.
+Claude 앱에서 그 세션을 열고 `품번 매입가`를 보낸다. 예: `IB7167-103 52100`
+- 처음에는 명령 실행 허락을 묻는다 -> 허용 (다시 묻지 않기 선택 가능)
+- 1~2분 뒤 판정과 추천 사이즈가 답으로 온다
 
 ## 이용약관
 
