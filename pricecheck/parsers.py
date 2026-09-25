@@ -17,6 +17,11 @@ def to_int(price_text):
     return int(price_text.replace(",", "").replace("원", ""))
 
 
+def size_key(s):
+    """크림 여성 사이즈는 "W265"처럼 W가 붙는다. 비교할 때는 숫자만 쓴다."""
+    return re.sub(r"^W", "", str(s or "").strip().upper())
+
+
 def normalize(s):
     """비교용: 대소문자, 공백, 하이픈 차이를 없앤다."""
     return re.sub(r"[\s\-/]", "", s or "").upper()
@@ -38,9 +43,9 @@ def parse_kream(text):
 
     # 상단 가격 구조: 라벨 -> ("38%") -> "86,000원" -> 상품명
     #   사이즈 선택 안 함: 라벨 = "발매가 139,000원"
-    #   사이즈 선택함(?size=270): 라벨 = "270 구매가"
+    #   사이즈 선택함(?size=270): 라벨 = "270 구매가" (여성 사이즈는 "W265 구매가")
     for i, l in enumerate(ls):
-        if l.startswith("발매가 ") or re.match(r"^\d{3} 구매가$", l):
+        if l.startswith("발매가 ") or re.match(r"^W?\d{3} 구매가$", l):
             for j in range(i + 1, min(i + 4, len(ls))):
                 p = PRICE_LINE.match(ls[j])
                 if p:

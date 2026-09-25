@@ -6,6 +6,7 @@ import re
 from datetime import date, datetime, timedelta
 
 from fees import kream_net_profit, poizon_net_profit
+from parsers import size_key
 
 MIN_PROFIT = 10000   # 이 금액 이상 남아야 "차익 있음"으로 본다 (--min-profit 으로 변경)
 
@@ -47,8 +48,9 @@ def speed_label(span_days, trade_count):
 def kream_size_row(info, size, today=None):
     """크림 사이즈 페이지 파싱 결과 -> 사이즈 한 줄 요약."""
     size = str(size)
-    ask = info["top_price"] if info.get("top_label") == f"{size} 구매가" else None
-    trades = [t for t in info.get("trades", []) if t["size"] == size]
+    label = (info.get("top_label") or "").replace(" 구매가", "")
+    ask = info["top_price"] if label and size_key(label) == size else None
+    trades = [t for t in info.get("trades", []) if size_key(t["size"]) == size]
     last = trades[0]["price"] if trades else None
     span = days_ago(trades[-1]["when"], today) if trades else None
     speed, weight = speed_label(span, len(trades))

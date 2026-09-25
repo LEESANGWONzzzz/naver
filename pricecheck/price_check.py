@@ -27,7 +27,7 @@ from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
-from parsers import normalize, parse_kream, parse_poizon, parse_poizon_seller
+from parsers import normalize, parse_kream, parse_poizon, parse_poizon_seller, size_key
 from fees import KREAM_DEFAULT_LEVEL, KREAM_SHIP_COST, kream_fee, kream_net_profit, poizon_cost, poizon_net_profit
 from profit import net_profit
 from scan import MIN_PROFIT, build_table, kream_size_row, parse_sizes, recommend, report
@@ -38,7 +38,8 @@ DEBUG_DIR = BASE_DIR / "debug"
 # 열 구성이 바뀌어 새 파일에 기록한다 (예전 기록은 price_log.csv에 그대로 남음)
 LOG_FILE = BASE_DIR / "results" / "price_log_v2.csv"
 SCAN_LOG = BASE_DIR / "results" / "scan_log.csv"
-DEFAULT_SIZES = "230-300"
+MEN_SIZES = "230-300"
+WOMEN_SIZES = "220-280"   # 크림 상품명이 "(W)"로 시작하면 자동 사용
 POIZON_SELLER_URL = "https://seller.poizon.com/main/dataBoard"
 KREAM_MAX_CANDIDATES = 5
 SEARCH_HINTS = ["货号", "품번", "商品", "상품", "SKU", "SPU", "Article", "검색", "搜索", "Search"]
@@ -65,6 +66,15 @@ def all_links(page, pattern):
         if re.search(pattern, h) and h not in out:
             out.append(h)
     return out
+
+
+def save_text(name, text):
+    """사이즈별 페이지 글자만 저장 (문제 생겼을 때 확인용). 같은 이름은 덮어쓴다."""
+    try:
+        DEBUG_DIR.mkdir(exist_ok=True)
+        (DEBUG_DIR / f"{name}.txt").write_text(text, encoding="utf-8")
+    except Exception:
+        pass
 
 
 def first_link(page, pattern):
@@ -127,6 +137,10 @@ def kream_scan(page, code, sizes):
         return r
     r.update(found=True, url=link, title=info["title"], model=info["model"],
              release_price=info["release_price"], login_needed=info["login_needed"])
+    if not sizes:
+        women = (info["title"] or "").startswith("(W)")
+        sizes = parse_sizes(WOMEN_SIZES if women else MEN_SIZES)
+        print(f"  {'여성' if women else '남성'} 상품 -> 사이즈 {sizes[0]}~{sizes[-1]} 조회")
     for s in sizes:
         page.goto(f"{link}?size={s}", wait_until="domcontentloaded")
         try:
@@ -135,7 +149,9 @@ def kream_scan(page, code, sizes):
         except Exception:
             pass  # 없는 사이즈이거나 늦게 뜬 경우. 아래에서 빈 값으로 처리
         page.wait_for_timeout(800)
-        si = parse_kream(page.inner_text("body"))
+        text = page.inner_text("body")
+        save_text(f"kream_{normalize(code)}_{s}", text)
+        si = parse_kream(text)
         row = kream_size_row(si, s)
         r["rows"].append(row)
         print(f"  크림 {s}: 예상가 {row['kream_expected'] or '-'} / 최근{row['trades']}건 {row['speed']}")
@@ -239,7 +255,7 @@ def print_kream(r, size, buy, level):
 
     trades = r["trades"]
     if size:
-        same = [t for t in trades if t["size"] == str(size)]
+        same = [t for t in trades if size_key(t["size"]) == str(size)]
         if same:
             t = same[0]
             print(f"  {size} 최근 체결: {won(t['price'])} ({t['when']}){profit_text(t['price'], buy, level, 'kream')}")
@@ -295,7 +311,7 @@ def append_log(code, size, buy, kream, poizon):
     LOG_FILE.parent.mkdir(exist_ok=True)
     new = not LOG_FILE.exists()
     k, p = kream or {}, poizon or {}
-    k_trade = next((t["price"] for t in k.get("trades", []) if t["size"] == str(size)), "")
+    k_trade = next((t["price"] for t in k.get("trades", []) if size_key(t["size"]) == str(size)), "")
     p_size = next((s["price"] for s in p.get("sizes", []) if s["size"] == str(size) and s["price"]), "")
     with open(LOG_FILE, "a", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
@@ -332,7 +348,8 @@ def login():
 
 
 def run_scan(ctx, page, code, buy, sizes, level, min_profit, kream_only, use_poizon=False):
-    print(f"품번 {code} / 매입가 {buy:,}원 / 사이즈 {sizes[0]}~{sizes[-1]} 조회 중... (1~2분 걸림)")
+    rng = f"사이즈 {sizes[0]}~{sizes[-1]}" if sizes else "사이즈 자동(남성 230~300 / 여성 220~280)"
+    print(f"품번 {code} / 매입가 {buy:,}원 / {rng} 조회 중... (1~2분 걸림)")
     kream = poizon_pub = seller = None
     try:
         kream = kream_scan(page, code, sizes)
@@ -393,7 +410,7 @@ def main():
     ap = argparse.ArgumentParser(description="KREAM / POIZON 시세 조회")
     ap.add_argument("code", nargs="?", help="품번 (예: DD1391-100)")
     ap.add_argument("buy_pos", nargs="?", type=int, metavar="매입가", help="매입가 (예: 69000)")
-    ap.add_argument("--sizes", default=DEFAULT_SIZES, help=f"조회할 사이즈 범위 (기본 {DEFAULT_SIZES}, 예: 250-290 또는 250,260,270)")
+    ap.add_argument("--sizes", help=f"조회할 사이즈 범위 (기본: 남성 {MEN_SIZES}, 여성 {WOMEN_SIZES} 자동. 예: 250-290 또는 250,260,270)")
     ap.add_argument("--min-profit", type=int, default=MIN_PROFIT, help=f"사입 기준 순수익 (기본 {MIN_PROFIT:,}원)")
     ap.add_argument("--kream-only", action="store_true", help="포이즌 조회를 아예 건너뜀 (더 빠름)")
     ap.add_argument("--use-poizon-price", action="store_true",
@@ -420,7 +437,7 @@ def main():
         with sync_playwright() as p:
             ctx = open_browser(p, args.headless)
             page = ctx.new_page()
-            run_scan(ctx, page, args.code, buy, parse_sizes(args.sizes), args.kream_level,
+            run_scan(ctx, page, args.code, buy, parse_sizes(args.sizes) if args.sizes else None, args.kream_level,
                      args.min_profit, args.kream_only, args.use_poizon_price)
             ctx.close()
         return
