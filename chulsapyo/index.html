@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>출사표 아침 상소</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Serif+KR:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#2a1a12; --bg2:#3b2418;
+  --paper:#efe2c2; --paper-edge:#d9c49a; --paper-shade:#c9b183;
+  --ink:#2b1d14; --ink-soft:#5a4634; --ink-faint:#8a7458;
+  --seal:#b3261e; --seal-ink:#fbeee0;
+  --rod:#5b2a17; --rod-cap:#c49a45;
+  --rule:rgba(90,60,30,.18);
+  --btn-bg:rgba(239,226,194,.08); --btn-ink:#efe2c2; --btn-line:rgba(239,226,194,.3);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#140c08; --bg2:#22140d;
+    --paper:#ddcfae; --paper-edge:#c5b085; --paper-shade:#b09a70;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#140c08; --bg2:#22140d;
+  --paper:#ddcfae; --paper-edge:#c5b085; --paper-shade:#b09a70;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:radial-gradient(ellipse at 50% 0%, var(--bg2), var(--bg) 70%);
+  color:var(--ink);
+  font-family:"Nanum Myeongjo","Noto Serif KR","Batang","바탕","AppleMyungjo",serif;
+  display:flex;flex-direction:column;align-items:center;
+  height:100vh;overflow:hidden;
+}
+/* 상단 조작부 */
+.bar{
+  width:100%;max-width:1200px;display:flex;gap:8px;justify-content:space-between;align-items:center;
+  padding:12px 16px;color:var(--btn-ink);font-size:14px;
+}
+.bar .date{letter-spacing:.1em;opacity:.85}
+@media (max-width:640px){.bar{font-size:12px}.bar button{padding:5px 9px}}
+.bar .btns{display:flex;gap:8px;flex-wrap:wrap}
+.bar button{
+  font:inherit;font-size:13px;color:var(--btn-ink);background:var(--btn-bg);
+  border:1px solid var(--btn-line);border-radius:3px;padding:6px 12px;cursor:pointer;
+}
+.bar button:hover{background:rgba(239,226,194,.18)}
+
+/* 두루마리 */
+.scroll{
+  position:relative;width:calc(100% - 32px);max-width:1160px;flex:1;
+  margin:0 16px 20px;display:flex;flex-direction:column;
+  min-height:0;min-width:0;
+}
+.rod{
+  height:22px;border-radius:11px;position:relative;z-index:2;
+  background:linear-gradient(180deg,#7a3a20,var(--rod) 45%,#3a1a0d);
+  box-shadow:0 4px 10px rgba(0,0,0,.45);
+  margin:0 -8px;
+}
+.rod::before,.rod::after{
+  content:"";position:absolute;top:-4px;width:26px;height:30px;border-radius:6px;
+  background:linear-gradient(180deg,#e2bd6a,var(--rod-cap) 50%,#7d5a1d);
+}
+.rod::before{left:-4px}.rod::after{right:-4px}
+.paper{
+  position:relative;flex:1;min-height:0;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 3px, rgba(120,90,40,.025) 3px 4px),
+    radial-gradient(ellipse at 20% 30%, rgba(255,255,255,.35), transparent 60%),
+    radial-gradient(ellipse at 80% 80%, rgba(150,110,50,.18), transparent 55%),
+    linear-gradient(90deg,var(--paper-shade),var(--paper) 4%,var(--paper) 96%,var(--paper-shade));
+  box-shadow:inset 0 0 60px rgba(120,80,30,.25), 0 10px 30px rgba(0,0,0,.5);
+  margin:-6px 0;
+  overflow:hidden;
+}
+.content{height:100%;width:100%;overflow:auto;padding:36px 44px;scroll-behavior:smooth}
+
+/* 세로쓰기 (기본) */
+body.vertical .content{
+  writing-mode:vertical-rl;text-orientation:mixed;
+  overflow-x:auto;overflow-y:hidden;
+  background-image:repeating-linear-gradient(90deg,transparent 0 calc(2.3em - 1px),var(--rule) calc(2.3em - 1px) 2.3em);
+  background-attachment:local;
+  line-height:2.3;font-size:19px;
+}
+body.vertical .content p{margin:0 0 0 0;text-indent:1em}
+body.vertical .content .gap{margin-left:1.2em}
+/* 가로쓰기 */
+body.horizontal .content{
+  line-height:1.95;font-size:17.5px;max-width:860px;margin:0 auto;
+}
+body.horizontal .content p{margin:0 0 1em;text-indent:1em}
+.content{word-break:keep-all;overflow-wrap:anywhere}
+
+.title-block{display:flex;align-items:center;gap:.6em}
+body.vertical .title-block,body.vertical .part-head,body.vertical .closing{display:block}
+body.vertical .title-block{margin-left:1.4em}
+body.vertical .main-title{letter-spacing:.15em}
+body.vertical .part-head .hanja{white-space:nowrap;display:block;margin-left:.3em}
+body.horizontal .title-block{margin-bottom:1.4em;justify-content:center;flex-direction:column}
+.main-title{
+  font-family:"Noto Serif KR",serif;font-weight:900;font-size:46px;letter-spacing:.3em;margin:0;color:var(--ink);
+}
+.sub-title{font-size:15px;color:var(--ink-soft);letter-spacing:.2em;margin:0}
+.part-head{display:flex;align-items:baseline;gap:.6em;margin:0}
+body.vertical .part-head{margin-left:1em}
+body.horizontal .part-head{margin:1.6em 0 1em;border-bottom:1px solid var(--rule);padding-bottom:.4em}
+.part-head .hanja{white-space:nowrap;font-family:"Noto Serif KR",serif;font-weight:900;font-size:26px;color:var(--seal)}
+.part-head h2{font-size:22px;margin:0;font-weight:800}
+.num{font-weight:800;color:var(--seal)}
+.lead{font-weight:700}
+.maxim{
+  border:1.5px solid var(--seal);color:var(--ink);padding:.8em .6em;font-weight:700;
+  background:rgba(179,38,30,.05);
+}
+body.vertical .maxim{margin-left:1.4em}
+body.horizontal .maxim{margin:0 0 1.6em;text-align:center;padding:.7em 1em}
+.maxim small{display:block;color:var(--seal);font-weight:800;letter-spacing:.3em;font-size:13px}
+body.vertical .maxim small{margin-left:.4em}
+body.horizontal .maxim small{margin-bottom:.3em}
+.closing{display:flex;align-items:center;gap:1em}
+body.vertical .closing{margin-left:1em}
+body.vertical .closing .seal{margin-top:1em}
+body.horizontal .closing{justify-content:flex-end;margin-top:1.4em}
+.seal{
+  writing-mode:horizontal-tb;width:64px;height:64px;flex:none;
+  background:var(--seal);color:var(--seal-ink);border-radius:6px;
+  display:grid;grid-template-columns:1fr 1fr;place-items:center;
+  font-family:"Noto Serif KR",serif;font-weight:900;font-size:24px;line-height:1;
+  padding:6px;transform:rotate(-4deg);
+  box-shadow:inset 0 0 0 3px var(--seal), inset 0 0 0 5px var(--seal-ink);
+  opacity:.9;
+}
+.hint{color:var(--btn-ink);opacity:.6;font-size:12px;padding:0 16px 12px;text-align:center}
+@media (max-width:640px){
+  .content{padding:24px 18px}
+  .main-title{font-size:34px}
+  .rod{margin:0 -6px}
+}
+</style>
+</head>
+<body class="horizontal">
+  <div class="bar">
+    <span class="date" id="date"></span>
+    <span class="btns">
+      <button id="toggle" type="button">세로로 읽기</button>
+      <button id="close" type="button">물러가라</button>
+    </span>
+  </div>
+  <div class="scroll">
+    <div class="rod"></div>
+    <div class="paper"><div class="content" id="content"></div></div>
+    <div class="rod"></div>
+  </div>
+  <div class="hint" id="hint">마우스 휠로 두루마리를 펼치소서 · 오른쪽에서 왼쪽으로 읽사옵니다</div>
+
+<script src="content.js"></script>
+<script>
+(function(){
+  var C = window.CHULSAPYO;
+  var el = document.getElementById('content');
+  var now = new Date();
+
+  // 간지 연도
+  var stems='甲乙丙丁戊己庚辛壬癸', branches='子丑寅卯辰巳午未申酉戌亥';
+  var y=now.getFullYear(), gz=stems[(y-4)%10]+branches[(y-4)%12];
+  var wd='日月火水木金土'[now.getDay()];
+  document.getElementById('date').textContent =
+    gz+'年 · '+y+'년 '+(now.getMonth()+1)+'월 '+now.getDate()+'일 ('+wd+')';
+
+  function esc(s){return s.replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function paras(body){
+    return body.trim().split(/\n\s*\n/).map(function(p){
+      p=esc(p.trim());
+      var m=p.match(/^([一二三四五六七八九十]+\.)\s*([^.]*?[.。])(.*)$/);
+      if(m) return '<p><span class="num">'+m[1]+'</span> <span class="lead">'+m[2]+'</span>'+m[3]+'</p>';
+      return '<p>'+p+'</p>';
+    }).join('');
+  }
+  function part(p){
+    return '<div class="part-head"><span class="hanja">'+esc(p.hanja)+'</span><h2>'+esc(p.title)+'</h2></div>'+paras(p.body)+'<div class="gap"></div>';
+  }
+  var start=new Date(y,0,0), day=Math.floor((now-start)/864e5);
+  var maxim=C.maxims[day % C.maxims.length];
+
+  el.innerHTML =
+    '<div class="title-block"><h1 class="main-title">出師表</h1><p class="sub-title">오늘 아침, 신 량이 삼가 올리나이다</p></div>'+
+    '<div class="maxim"><small>今日一言</small>'+esc(maxim)+'</div>'+
+    part(C.part1)+part(C.part2)+
+    '<div class="closing"><span class="sub-title">建興의 뜻을 이어 · '+esc(C.sender)+' 頓首</span>'+
+    '<span class="seal" aria-label="인장"><span>亮</span><span>諸</span><span>印</span><span>葛</span></span></div>';
+
+  // 세로/가로 전환 (기억은 이 브라우저에만)
+  var body=document.body, btn=document.getElementById('toggle'), hint=document.getElementById('hint');
+  function setMode(m){
+    body.className=m;
+    btn.textContent = m==='vertical' ? '가로로 읽기' : '세로로 읽기';
+    hint.style.display = m==='vertical' ? '' : 'none';
+    el.scrollLeft=0; el.scrollTop=0;
+    try{localStorage.setItem('chulsapyo-mode',m)}catch(e){}
+  }
+  var saved=null; try{saved=localStorage.getItem('chulsapyo-mode')}catch(e){}
+  setMode(saved === 'vertical' ? 'vertical' : 'horizontal');
+  btn.onclick=function(){setMode(body.className==='vertical'?'horizontal':'vertical')};
+
+  // 세로쓰기에서는 휠을 가로 이동으로
+  el.addEventListener('wheel',function(e){
+    if(body.className!=='vertical' || Math.abs(e.deltaX)>Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    el.style.scrollBehavior='auto';
+    el.scrollLeft -= e.deltaY;
+    el.style.scrollBehavior='';
+  },{passive:false});
+
+  document.getElementById('close').onclick=function(){
+    window.close();
+    setTimeout(function(){hint.style.display='';hint.textContent='창의 X 버튼으로 닫아 주시옵소서.'},200);
+  };
+})();
+</script>
+</body>
+</html>
