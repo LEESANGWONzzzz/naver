@@ -23,14 +23,15 @@ from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
-from parsers import normalize, parse_kream, parse_poizon
+from parsers import normalize, parse_kream, parse_poizon, parse_poizon_seller
 from fees import KREAM_DEFAULT_LEVEL, KREAM_SHIP_COST, kream_fee, kream_net_profit, poizon_cost, poizon_net_profit
 from profit import net_profit
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "browser_profile"
 DEBUG_DIR = BASE_DIR / "debug"
-LOG_FILE = BASE_DIR / "results" / "price_log.csv"
+# 열 구성이 바뀌어 새 파일에 기록한다 (예전 기록은 price_log.csv에 그대로 남음)
+LOG_FILE = BASE_DIR / "results" / "price_log_v2.csv"
 POIZON_SELLER_URL = "https://seller.poizon.com/main/dataBoard"
 KREAM_MAX_CANDIDATES = 5
 SEARCH_HINTS = ["货号", "품번", "商品", "상품", "SKU", "SPU", "Article", "검색", "搜索", "Search"]
@@ -130,10 +131,14 @@ def check_poizon_seller(page, code):
             r["new_tab"] = True
         r["searched"] = True
         r["url"] = page.url
-    r["found"] = True
-    r["code_in_page"] = normalize(code) in normalize(page.inner_text("body"))
+    text = page.inner_text("body")
     r["debug"] = str(save_debug(page, "poizon_seller_search", code))
-    r["note"] = "셀러센터 화면 구조 확인 전 -> debug 폴더의 poizon_seller_* 파일을 Claude에게 보내면 가격 읽기를 추가"
+    info = parse_poizon_seller(text, code)
+    if info["match"]:
+        r.update(info["match"], found=True)
+    else:
+        codes = ", ".join(x["code"] for x in info["rows"]) or "없음"
+        r["note"] = f"검색 결과에 품번이 같은 상품이 없음 (결과 품번: {codes})"
     return r
 
 
@@ -226,33 +231,36 @@ def print_poizon(r, size, buy, kream_title):
         print(f"  사이즈별 가격: 확인 불가 (상단 가격 {won(r['top_price'])})")
 
 
-def print_poizon_seller(r):
+def print_poizon_seller(r, buy):
     print("\n[POIZON 셀러센터]")
-    if r.get("note") and not r["found"]:
-        print(f"  {r['note']}\n  디버그: {r.get('debug')}.png")
+    if not r["found"]:
+        print(f"  {r.get('note', '')}\n  디버그: {r.get('debug')}.png")
         return
-    print(f"  검색 실행: {'예' if r['searched'] else '아니오'}" + (" (새 탭으로 열림)" if r.get("new_tab") else ""))
-    print(f"  결과 화면 주소: {r.get('url')}")
-    print(f"  화면에 품번 보임: {'예' if r['code_in_page'] else '아니오'}")
-    print(f"  {r['note']}")
-    print(f"  디버그: {r.get('debug_board')}.png, {r.get('debug')}.png")
+    print(f"  상품: {r['title']} (품번 {r['code']}, SPU {r['spu_id']}, {r['status']})")
+    print(f"  최근 30일 평균 거래가: {won(r['avg30'])}{profit_text(r['avg30'], buy, channel='poizon')}")
+    print(f"  중국 구매자 페이지 노출가: {won(r['exposure'])}{profit_text(r['exposure'], buy, channel='poizon')}")
+    print(f"  최근 30일 판매량: {r['sales30'] or '확인 불가'} / 현지 판매자 30일 판매량: {r['local_sales30'] or '확인 불가'}")
+    print("  (사이즈별 가격은 아직 미지원, 위 가격은 전체 사이즈 기준)")
 
 
 def append_log(code, size, buy, kream, poizon):
     LOG_FILE.parent.mkdir(exist_ok=True)
     new = not LOG_FILE.exists()
-    k_size = next((t["price"] for t in (kream or {}).get("trades", []) if t["size"] == str(size)), "")
-    p_size = next((s["price"] for s in (poizon or {}).get("sizes", []) if s["size"] == str(size) and s["price"]), "")
+    k, p = kream or {}, poizon or {}
+    k_trade = next((t["price"] for t in k.get("trades", []) if t["size"] == str(size)), "")
+    p_size = next((s["price"] for s in p.get("sizes", []) if s["size"] == str(size) and s["price"]), "")
     with open(LOG_FILE, "a", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         if new:
-            w.writerow(["time", "code", "size", "buy", "title", "kream_model_match",
-                        "kream_top", "kream_size_trade", "poizon_top", "poizon_size", "kream_url", "poizon_url"])
-        k, p = kream or {}, poizon or {}
+            w.writerow(["time", "code", "size", "buy", "title",
+                        "kream_model_match", "kream_top_label", "kream_top", "kream_size_trade",
+                        "poizon_avg30", "poizon_exposure", "poizon_sales30", "poizon_public_size",
+                        "kream_url"])
         w.writerow([datetime.now().strftime("%Y-%m-%d %H:%M"), code, size or "", buy or "",
-                    k.get("title") or p.get("title") or "", k.get("model_match", ""),
-                    k.get("top_price") or "", k_size, p.get("top_price") or "", p_size,
-                    k.get("url", ""), p.get("url", "")])
+                    k.get("title") or p.get("title") or "",
+                    k.get("model_match", ""), k.get("top_label") or "", k.get("top_price") or "", k_trade,
+                    p.get("avg30") or "", p.get("exposure") or "", p.get("sales30") or "", p_size,
+                    k.get("url", "")])
 
 
 def open_browser(p, headless):
@@ -318,8 +326,8 @@ def main():
     if kream:
         print_kream(kream, args.size, args.buy, args.kream_level)
     if poizon and poizon.get("seller"):
-        print_poizon_seller(poizon)
-    elif poizon:
+        print_poizon_seller(poizon, args.buy)
+    elif poizon:  # --poizon-public
         print_poizon(poizon, args.size, args.buy, kream.get("title") if kream else None)
     append_log(args.code, args.size, args.buy, kream, poizon)
     print(f"\n기록 저장: {LOG_FILE}")

@@ -92,3 +92,46 @@ def parse_poizon(text):
                                  "price": to_int(p.group(1)) if p else None})
             k += 2
     return out
+
+
+WON_LINE = re.compile(r"^₩\s*([0-9]{1,3}(?:,[0-9]{3})*)$")
+
+
+def parse_poizon_seller(text, code):
+    """POIZON 판매자 센터 상품 검색 결과 표 -> 품번이 맞는 행의 시장 데이터.
+
+    2026-09-26 확인한 행 구조:
+      "상품 번호:" -> 품번 -> 상품명 -> "SPU_ID：1237613" -> 브랜드 -> 카테고리 -> 상태
+      -> "₩110,000"(최근 30일 평균 거래가) -> "₩91,000"(중국 구매자 페이지 노출)
+      -> "3,900+"(최근 30일 판매량) -> "80"(현지 판매자 최근 30일 판매량) ... "입찰 등록"
+    """
+    ls = lines_of(text)
+    rows = []
+    for i, l in enumerate(ls):
+        if l != "상품 번호:" or i + 3 >= len(ls):
+            continue
+        row = {"code": ls[i + 1], "title": ls[i + 2], "spu_id": None, "status": None,
+               "avg30": None, "exposure": None, "sales30": None, "local_sales30": None}
+        m = re.search(r"SPU_ID\s*[:：]\s*(\d+)", ls[i + 3])
+        if m:
+            row["spu_id"] = m.group(1)
+        # 이 행의 끝("입찰 등록" 또는 다음 "상품 번호:")까지
+        end = len(ls)
+        for j in range(i + 4, len(ls)):
+            if ls[j] in ("입찰 등록", "상품 번호:"):
+                end = j
+                break
+        cells = ls[i + 4:end]
+        wons = [k for k, c in enumerate(cells) if WON_LINE.match(c)]
+        if wons:
+            row["status"] = cells[wons[0] - 1] if wons[0] >= 1 else None
+            row["avg30"] = to_int(WON_LINE.match(cells[wons[0]]).group(1))
+            if len(wons) > 1 and wons[1] == wons[0] + 1:
+                row["exposure"] = to_int(WON_LINE.match(cells[wons[1]]).group(1))
+                rest = cells[wons[1] + 1:]
+                row["sales30"] = rest[0] if len(rest) > 0 else None
+                row["local_sales30"] = rest[1] if len(rest) > 1 else None
+        rows.append(row)
+
+    match = [r for r in rows if normalize(r["code"]) == normalize(code)]
+    return {"rows": rows, "match": match[0] if match else None}
