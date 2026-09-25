@@ -23,6 +23,12 @@ pip install -r requirements.txt
 python -m playwright install msedge
 ```
 
+## 업데이트 (Claude가 코드를 고친 뒤)
+
+`pricecheck` 폴더에서 `update.cmd` 실행. 파일마다 `updated: 파일이름`이 나오면 끝.
+(raw.githubusercontent.com 주소는 몇 분간 예전 파일을 줄 수 있어서, 캐시 없는 GitHub API 주소로 받는다.
+저장소를 비공개로 바꾸면 이 방법은 안 되고 브라우저로 ZIP을 받아야 한다.)
+
 ## 2단계: 조회해 보기
 
 ```
