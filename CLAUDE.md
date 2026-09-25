@@ -65,3 +65,13 @@
 ## 이 저장소에 있는 것
 
 - `chulsapyo/` — 매일 오전 7시와 로그인 시 뜨는 제갈량 말투 조언 창 (Windows/macOS 설치 스크립트 포함). 자세한 내용은 `chulsapyo/README.md`.
+- `pricecheck/` — 품번으로 KREAM / POIZON 시세 조회 + 스마트스토어 순수익 계산. 자세한 내용은 `pricecheck/README.md`.
+
+## 시세 조회 요청을 받았을 때 (Remote Control, 집 Windows PC)
+
+사용자가 아이폰에서 "DD1391-100 270 시세, 매입가 69000" 같은 형식으로 보내면:
+
+1. `pricecheck\run.cmd <품번> --size <사이즈> --buy <매입가>` 실행 (없는 값은 생략)
+2. 결과를 짧게 요약: KREAM 최근 거래가 / 즉시 구매가 / 즉시 판매가, POIZON 가격, 스마트스토어 순수익
+3. "품번 일치: 아니오" 또는 "확인 불가"가 나오면 그대로 알리고, `pricecheck\debug`의 최신 png를 열어 원인 확인
+4. 모바일에서 읽으므로 답은 짧게, 숫자 위주로

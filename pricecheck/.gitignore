@@ -1,0 +1,5 @@
+# 로그인 정보가 들어 있으므로 절대 올리지 않는다
+browser_profile/
+debug/
+results/
+__pycache__/
