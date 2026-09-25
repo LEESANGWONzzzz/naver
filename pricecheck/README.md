@@ -29,11 +29,18 @@ python -m playwright install msedge
 run.cmd DD1391-100
 run.cmd DD1391-100 --size 270
 run.cmd DD1391-100 --size 270 --buy 69000
+run.cmd DD1391-100 --size 270 --buy 69000 --kream-level 2
 run.cmd DD1391-100 --only kream
+run.cmd DD1391-100 --poizon-public
 run.cmd --login
 ```
 
-- `--login`: 처음 한 번 실행해서 열린 창에서 크림에 로그인. 로그인 안 하면 크림 체결 거래가 5건 정도만 보인다.
+- `--login`: 처음 한 번 실행. 창에 탭 두 개가 열리면 크림, 포이즌 셀러센터에 각각 로그인한 뒤 cmd에서 Enter.
+- `--kream-level`: 크림 판매자 등급 (1~5, 기본 1 = 수수료 6%). 등급은 크림 앱에서 확인.
+- POIZON은 기본으로 **판매자 센터**(seller.poizon.com/main/dataBoard)를 연다.
+  셀러센터 화면 구조를 아직 확인하지 못해서 지금은 **캡처 저장 + 검색 시도**까지만 한다.
+  `debug` 폴더의 `poizon_seller_*` 파일을 Claude에게 보내면 가격 읽기를 추가한다.
+- `--poizon-public`: 예전처럼 소비자 사이트(kr.poizon.com) 사이즈별 가격 조회.
 
 - Edge 창이 잠깐 떴다가 닫힌다. 로그인이 필요하다고 나오면 그 창에서 한 번 로그인하면 다음부터 유지된다 (`browser_profile` 폴더에 저장).
 - 결과는 화면에 나오고 `results\price_log.csv`에도 누적된다 (엑셀로 열림).
@@ -61,7 +68,11 @@ run.cmd --login
 - **모델번호 일치: 아니오**가 나오면 크림 검색 첫 번째 상품이 다른 상품일 수 있으니 주소를 눌러 직접 확인.
 - 포이즌 페이지에는 모델번호가 없어서, 크림 상품명과 같은지로 대신 확인한다.
 - 크림 "상단 구매가"가 선택한 사이즈 가격인지는 아직 검증 안 됨. 사이즈 가격은 "최근 체결"을 우선 본다.
-- 순수익은 **스마트스토어 공식** 기준이다 (KREAM/POIZON 판매 수수료는 반영 안 함).
+- 순수익은 채널별로 보여준다. 수수료 설정은 `fees.py`.
+  - 크림 판매 시: (판매가 × 등급 수수료 + 2,500) × 1.1, 최대 300,000원 (2026-03-02 적용 기준)
+  - 스마트스토어 판매 시: `profit.py` 공식
+  - 포이즌 판매 시: 한국 개인 판매자 수수료를 확인하지 못해 **계산 안 함**. 셀러센터에서 확인되면 `fees.py`의 `POIZON_FEE_RATE` 등에 입력.
+  - 크림 검수센터로 보내는 택배비는 `fees.py`의 `KREAM_SHIP_COST` (기본 0, 확인 필요).
 
 ## 3단계: 아이폰에서 명령하기 (Remote Control)
 

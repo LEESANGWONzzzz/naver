@@ -4,7 +4,11 @@
     python price_check.py DD1391-100
     python price_check.py DD1391-100 --size 270
     python price_check.py DD1391-100 --size 270 --buy 69000
-    python price_check.py --login          (처음 한 번: 크림 로그인)
+    python price_check.py DD1391-100 --size 270 --buy 69000 --kream-level 2
+    python price_check.py --login          (처음 한 번: 크림 + 포이즌 셀러센터 로그인)
+
+- POIZON은 판매자 센터(seller.poizon.com)를 조회한다. --poizon-public 을 붙이면 소비자 사이트(kr.poizon.com).
+- 수수료 설정은 fees.py에 있다.
 
 - 매 조회마다 debug 폴더에 화면 캡처(png)와 페이지 글자(txt)를 저장한다.
 - 가격 읽는 규칙은 parsers.py에 있다.
@@ -20,12 +24,15 @@ from urllib.parse import quote
 from playwright.sync_api import sync_playwright
 
 from parsers import normalize, parse_kream, parse_poizon
+from fees import KREAM_DEFAULT_LEVEL, kream_fee, kream_net_profit, poizon_net_profit
 from profit import net_profit
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "browser_profile"
 DEBUG_DIR = BASE_DIR / "debug"
 LOG_FILE = BASE_DIR / "results" / "price_log.csv"
+POIZON_SELLER_URL = "https://seller.poizon.com/main/dataBoard"
+SEARCH_HINTS = ["货号", "품번", "商品", "상품", "SKU", "SPU", "Article", "검색", "搜索", "Search"]
 
 
 def save_debug(page, site, code):
@@ -69,6 +76,39 @@ def check_kream(page, code, size):
     return r
 
 
+def check_poizon_seller(page, code):
+    """POIZON 판매자 센터. 화면 구조를 아직 확인하지 못해 캡처 저장 + 검색 시도까지만 한다."""
+    r = {"site": "POIZON 셀러센터", "found": False, "seller": True}
+    page.goto(POIZON_SELLER_URL, wait_until="domcontentloaded")
+    page.wait_for_timeout(6000)
+    r["url"] = page.url
+    if "login" in page.url.lower():
+        r["note"] = "로그인 안 됨 -> run.cmd --login 으로 셀러센터에 한 번 로그인"
+        r["debug"] = str(save_debug(page, "poizon_seller_login", code))
+        return r
+    r["debug_board"] = str(save_debug(page, "poizon_seller_board", code))
+
+    # 검색창 찾기: placeholder에 품번/상품/SKU 같은 글자가 있는 입력칸
+    box = None
+    for el in page.locator("input:visible").all():
+        ph = (el.get_attribute("placeholder") or "")
+        if any(h.lower() in ph.lower() for h in SEARCH_HINTS):
+            box = el
+            break
+    if box:
+        box.fill(code)
+        box.press("Enter")
+        page.wait_for_timeout(5000)
+        r["searched"] = True
+    else:
+        r["searched"] = False
+    r["found"] = True
+    r["code_in_page"] = normalize(code) in normalize(page.inner_text("body"))
+    r["debug"] = str(save_debug(page, "poizon_seller_search", code))
+    r["note"] = "셀러센터 화면 구조 확인 전 -> debug 폴더의 poizon_seller_* 파일을 Claude에게 보내면 가격 읽기를 추가"
+    return r
+
+
 def check_poizon(page, code):
     r = {"site": "POIZON", "found": False}
     page.goto(f"https://kr.poizon.com/search?keyword={quote(code)}", wait_until="domcontentloaded")
@@ -90,13 +130,21 @@ def won(v):
     return f"{v:,}원" if isinstance(v, int) else "확인 불가"
 
 
-def profit_text(price, buy):
-    if buy and isinstance(price, int):
-        return f"  (스마트스토어 {price:,}원 판매 시 순수익 {net_profit(price, buy):,}원)"
-    return ""
+def profit_text(price, buy, level=None, channel="smartstore"):
+    """channel: smartstore = 스마트스토어 공식, kream = 크림 판매 수수료, poizon = 포이즌 수수료."""
+    if not (buy and isinstance(price, int)):
+        return ""
+    ss = f"스마트스토어 판매 시 {net_profit(price, buy):,}원"
+    if channel == "kream":
+        return f"\n      순수익: 크림 판매 시 {kream_net_profit(price, buy, level):,}원 (수수료 {kream_fee(price, level):,}원) / {ss}"
+    if channel == "poizon":
+        pz = poizon_net_profit(price, buy)
+        pz_text = f"포이즌 판매 시 {pz:,}원" if pz is not None else "포이즌 판매 시 확인 불가(수수료 미확인)"
+        return f"\n      순수익: {pz_text} / {ss}"
+    return f"\n      순수익: {ss}"
 
 
-def print_kream(r, size, buy):
+def print_kream(r, size, buy, level):
     print("\n[KREAM]")
     if not r["found"]:
         print(f"  {r.get('note', '')}\n  디버그: {r.get('debug')}.png")
@@ -106,14 +154,14 @@ def print_kream(r, size, buy):
     print(f"  모델번호 일치: {match}")
     print(f"  발매가: {won(r['release_price'])}")
     label = f"상단 구매가(사이즈 {size} 주소로 조회, 사이즈 반영 여부 미검증)" if size else "상단 구매가(전체 사이즈 중)"
-    print(f"  {label}: {won(r['top_price'])}{profit_text(r['top_price'], buy)}")
+    print(f"  {label}: {won(r['top_price'])}{profit_text(r['top_price'], buy, level, 'kream')}")
 
     trades = r["trades"]
     if size:
         same = [t for t in trades if t["size"] == str(size)]
         if same:
             t = same[0]
-            print(f"  {size} 최근 체결: {won(t['price'])} ({t['when']}){profit_text(t['price'], buy)}")
+            print(f"  {size} 최근 체결: {won(t['price'])} ({t['when']}){profit_text(t['price'], buy, level, 'kream')}")
         else:
             print(f"  {size} 최근 체결: 보이는 목록에 없음")
     if trades:
@@ -139,13 +187,24 @@ def print_poizon(r, size, buy, kream_title):
         if not hits:
             print(f"  {size}: 사이즈표에 없음")
         for s in hits:
-            print(f"  {s['label']}: {won(s['price'])}{profit_text(s['price'], buy)}")
+            print(f"  {s['label']}: {won(s['price'])}{profit_text(s['price'], buy, channel='poizon')}")
     if priced:
         low = min(priced, key=lambda s: s["price"])
         print(f"  전체 사이즈 최저: {low['label']} {low['price']:,}원")
         print("  사이즈별: " + ", ".join(f"{s['label']} {s['price'] // 1000:,}천" for s in priced))
     else:
         print(f"  사이즈별 가격: 확인 불가 (상단 가격 {won(r['top_price'])})")
+
+
+def print_poizon_seller(r):
+    print("\n[POIZON 셀러센터]")
+    if r.get("note") and not r["found"]:
+        print(f"  {r['note']}\n  디버그: {r.get('debug')}.png")
+        return
+    print(f"  검색창 찾음: {'예' if r['searched'] else '아니오'}")
+    print(f"  화면에 품번 보임: {'예' if r['code_in_page'] else '아니오'}")
+    print(f"  {r['note']}")
+    print(f"  디버그: {r.get('debug_board')}.png, {r.get('debug')}.png")
 
 
 def append_log(code, size, buy, kream, poizon):
@@ -178,7 +237,9 @@ def login():
         ctx = open_browser(p, headless=False)
         page = ctx.new_page()
         page.goto("https://kream.co.kr/login")
-        input("열린 창에서 크림에 로그인한 뒤, 여기서 Enter를 누르세요...")
+        page2 = ctx.new_page()
+        page2.goto(POIZON_SELLER_URL)
+        input("열린 창의 두 탭에서 크림, 포이즌 셀러센터에 각각 로그인한 뒤, 여기서 Enter를 누르세요...")
         ctx.close()
     print("로그인 상태를 저장했습니다.")
 
@@ -190,7 +251,10 @@ def main():
     ap.add_argument("--buy", type=int, help="매입가 (넣으면 순수익 계산)")
     ap.add_argument("--headless", action="store_true", help="브라우저 창 숨기기")
     ap.add_argument("--only", choices=["kream", "poizon"], help="한 사이트만 조회")
-    ap.add_argument("--login", action="store_true", help="크림 로그인 창 열기 (처음 한 번)")
+    ap.add_argument("--login", action="store_true", help="크림 + 포이즌 셀러센터 로그인 창 열기 (처음 한 번)")
+    ap.add_argument("--kream-level", type=int, choices=[1, 2, 3, 4, 5], default=KREAM_DEFAULT_LEVEL,
+                    help="크림 판매자 등급 (기본 1 = 수수료 6%%)")
+    ap.add_argument("--poizon-public", action="store_true", help="포이즌 소비자 사이트(kr.poizon.com)로 조회")
     args = ap.parse_args()
 
     if args.login:
@@ -211,15 +275,20 @@ def main():
                          "debug": str(save_debug(page, "kream_error", args.code))}
         if args.only != "kream":
             try:
-                poizon = check_poizon(page, args.code)
+                if args.poizon_public:
+                    poizon = check_poizon(page, args.code)
+                else:
+                    poizon = check_poizon_seller(page, args.code)
             except Exception as e:
                 poizon = {"site": "POIZON", "found": False, "note": f"오류: {e}",
                           "debug": str(save_debug(page, "poizon_error", args.code))}
         ctx.close()
 
     if kream:
-        print_kream(kream, args.size, args.buy)
-    if poizon:
+        print_kream(kream, args.size, args.buy, args.kream_level)
+    if poizon and poizon.get("seller"):
+        print_poizon_seller(poizon)
+    elif poizon:
         print_poizon(poizon, args.size, args.buy, kream.get("title") if kream else None)
     append_log(args.code, args.size, args.buy, kream, poizon)
     print(f"\n기록 저장: {LOG_FILE}")
