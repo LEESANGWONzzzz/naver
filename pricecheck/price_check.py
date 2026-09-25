@@ -32,6 +32,7 @@ PROFILE_DIR = BASE_DIR / "browser_profile"
 DEBUG_DIR = BASE_DIR / "debug"
 LOG_FILE = BASE_DIR / "results" / "price_log.csv"
 POIZON_SELLER_URL = "https://seller.poizon.com/main/dataBoard"
+KREAM_MAX_CANDIDATES = 5
 SEARCH_HINTS = ["货号", "품번", "商品", "상품", "SKU", "SPU", "Article", "검색", "搜索", "Search"]
 
 
@@ -47,32 +48,49 @@ def save_debug(page, site, code):
     return base
 
 
-def first_link(page, pattern):
-    """페이지에서 href가 pattern(정규식)에 맞는 첫 링크 주소를 돌려준다."""
+def all_links(page, pattern):
+    """페이지에서 href가 pattern(정규식)에 맞는 링크 주소를 순서대로 (중복 없이) 돌려준다."""
     hrefs = page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
+    out = []
     for h in hrefs:
-        if re.search(pattern, h):
-            return h
-    return None
+        h = h.split("?")[0]
+        if re.search(pattern, h) and h not in out:
+            out.append(h)
+    return out
+
+
+def first_link(page, pattern):
+    links = all_links(page, pattern)
+    return links[0] if links else None
 
 
 def check_kream(page, code, size):
     r = {"site": "KREAM", "found": False}
     page.goto(f"https://kream.co.kr/search?keyword={quote(code)}", wait_until="domcontentloaded")
     page.wait_for_timeout(4000)
-    link = first_link(page, r"kream\.co\.kr/products/\d+")
-    if not link:
+    links = all_links(page, r"kream\.co\.kr/products/\d+$")[:KREAM_MAX_CANDIDATES]
+    if not links:
         r["note"] = "검색 결과에서 상품 링크를 못 찾음"
         r["debug"] = str(save_debug(page, "kream_search", code))
         return r
 
-    url = link.split("?")[0] + (f"?size={size}" if size else "")
-    page.goto(url, wait_until="domcontentloaded")
-    page.wait_for_timeout(4000)
-    info = parse_kream(page.inner_text("body"))
-    r.update(info, found=True, url=url,
-             model_match=normalize(info["model"]) == normalize(code),
-             debug=str(save_debug(page, "kream", code)))
+    # 같은 이름의 다른 상품이 먼저 나올 수 있어서, 모델번호가 맞는 상품이 나올 때까지 차례로 연다.
+    seen = []
+    first = None
+    for link in links:
+        url = link + (f"?size={size}" if size else "")
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_timeout(4000)
+        info = parse_kream(page.inner_text("body"))
+        seen.append(info["model"] or "?")
+        cur = dict(info, url=url, model_match=normalize(info["model"]) == normalize(code))
+        if first is None:
+            first = cur
+        if cur["model_match"]:
+            r.update(cur, found=True, debug=str(save_debug(page, "kream", code)))
+            return r
+    r.update(first, found=True, debug=str(save_debug(page, "kream", code)),
+             note=f"검색 상위 {len(seen)}개 모두 모델번호 불일치: {', '.join(seen)}")
     return r
 
 
@@ -95,13 +113,23 @@ def check_poizon_seller(page, code):
         if any(h.lower() in ph.lower() for h in SEARCH_HINTS):
             box = el
             break
+    r["searched"] = False
     if box:
         box.fill(code)
-        box.press("Enter")
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(1000)
+        # Enter로는 검색이 안 되고 "검색 및 입찰" 버튼을 눌러야 한다 (2026-09-26 확인).
+        # 결과가 새 탭으로 열릴 수 있어서 새 탭도 기다린다.
+        btn = page.get_by_text("검색 및 입찰", exact=True).first
+        before = len(page.context.pages)
+        btn.click()
+        page.wait_for_timeout(6000)
+        if len(page.context.pages) > before:
+            page = page.context.pages[-1]
+            page.wait_for_load_state("domcontentloaded")
+            page.wait_for_timeout(4000)
+            r["new_tab"] = True
         r["searched"] = True
-    else:
-        r["searched"] = False
+        r["url"] = page.url
     r["found"] = True
     r["code_in_page"] = normalize(code) in normalize(page.inner_text("body"))
     r["debug"] = str(save_debug(page, "poizon_seller_search", code))
@@ -153,7 +181,7 @@ def print_kream(r, size, buy, level):
     match = "예" if r["model_match"] else f"아니오 (페이지 모델번호 {r['model']}, 확인 필요)"
     print(f"  모델번호 일치: {match}")
     print(f"  발매가: {won(r['release_price'])}")
-    label = f"상단 구매가(사이즈 {size} 주소로 조회, 사이즈 반영 여부 미검증)" if size else "상단 구매가(전체 사이즈 중)"
+    label = r.get("top_label") or "상단 구매가"
     print(f"  {label}: {won(r['top_price'])}{profit_text(r['top_price'], buy, level, 'kream')}")
 
     trades = r["trades"]
@@ -166,6 +194,8 @@ def print_kream(r, size, buy, level):
             print(f"  {size} 최근 체결: 보이는 목록에 없음")
     if trades:
         print("  최근 체결 거래: " + ", ".join(f"{t['size']} {t['price']:,}원({t['when']})" for t in trades))
+    if r.get("note"):
+        print(f"  ⚠ {r['note']}")
     if r["login_needed"]:
         print("  참고: 로그인 안 된 상태라 체결 거래가 일부만 보임 -> run.cmd --login 으로 한 번 로그인")
 
@@ -201,7 +231,8 @@ def print_poizon_seller(r):
     if r.get("note") and not r["found"]:
         print(f"  {r['note']}\n  디버그: {r.get('debug')}.png")
         return
-    print(f"  검색창 찾음: {'예' if r['searched'] else '아니오'}")
+    print(f"  검색 실행: {'예' if r['searched'] else '아니오'}" + (" (새 탭으로 열림)" if r.get("new_tab") else ""))
+    print(f"  결과 화면 주소: {r.get('url')}")
     print(f"  화면에 품번 보임: {'예' if r['code_in_page'] else '아니오'}")
     print(f"  {r['note']}")
     print(f"  디버그: {r.get('debug_board')}.png, {r.get('debug')}.png")

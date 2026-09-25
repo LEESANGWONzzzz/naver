@@ -25,23 +25,28 @@ def normalize(s):
 def parse_kream(text):
     """KREAM 상품 페이지 글자 -> 상품명, 모델번호, 상단 가격, 체결 거래."""
     ls = lines_of(text)
-    out = {"title": None, "model": None, "top_price": None, "release_price": None,
-           "trades": [], "login_needed": "모든 시세는 로그인 후 확인 가능합니다." in ls}
+    out = {"title": None, "model": None, "top_price": None, "top_label": None,
+           "release_price": None, "trades": [],
+           "login_needed": "모든 시세는 로그인 후 확인 가능합니다." in ls}
 
     m = re.search(r"모델번호\s+(\S+)", text)
     if m:
         out["model"] = m.group(1)
+    m = re.search(r"발매가\s+([0-9,]+)원", text)
+    if m:
+        out["release_price"] = to_int(m.group(1))
 
-    # 구조: "발매가 139,000원" -> ("38%") -> "85,000원" -> 상품명
+    # 상단 가격 구조: 라벨 -> ("38%") -> "86,000원" -> 상품명
+    #   사이즈 선택 안 함: 라벨 = "발매가 139,000원"
+    #   사이즈 선택함(?size=270): 라벨 = "270 구매가"
     for i, l in enumerate(ls):
-        if l.startswith("발매가 "):
+        if l.startswith("발매가 ") or re.match(r"^\d{3} 구매가$", l):
             for j in range(i + 1, min(i + 4, len(ls))):
                 p = PRICE_LINE.match(ls[j])
                 if p:
                     out["top_price"] = to_int(p.group(1))
+                    out["top_label"] = l if l.endswith("구매가") else "구매가(전체 사이즈)"
                     out["title"] = ls[j + 1] if j + 1 < len(ls) else None
-                    rp = re.search(r"([0-9,]+)원", l)
-                    out["release_price"] = to_int(rp.group(1)) if rp else None
                     break
             if out["top_price"]:
                 break
