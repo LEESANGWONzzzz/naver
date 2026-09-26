@@ -141,6 +141,8 @@ claude remote-control
 - 처음 한 번 `Enable Remote Control? (y/n)`이 나오면 `y`
 - 스페이스바를 누르면 QR 코드가 나온다 -> 아이폰 카메라로 찍으면 Claude 앱에서 열린다
 - 이 cmd 창은 닫지 않는다 (닫으면 아이폰에서 연결 끊김)
+- 더 쉬운 방법: 저장소 폴더의 `start_remote.cmd`를 더블클릭 (위 두 줄과 같다)
+- PC 켤 때 자동으로 켜기: `Win+R` -> `shell:startup` -> 열린 폴더에 `start_remote.cmd`의 바로가기를 넣는다
 
 ### 아이폰에서
 
